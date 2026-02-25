@@ -1,0 +1,20 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: podinfo-subsets
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  host: podinfo.{{ .Namespace }}.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        h2UpgradePolicy: UPGRADE
+  subsets:
+    - name: stable
+      labels:
+        version: v1
+    - name: canary
+      labels:
+        version: v2

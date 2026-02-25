@@ -1,0 +1,15 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: l4-deny-non-mesh
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  action: DENY
+  rules:
+    - from:
+        - source:
+            # Deny traffic from the non-mesh namespace
+            namespaces:
+              - "non-mesh-{{ .TestID }}"

@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: podinfo-mirror
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  hosts:
+    - podinfo.{{ .Namespace }}.svc.cluster.local
+  gateways:
+    - mesh
+  http:
+    - route:
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local
+            subset: stable
+          weight: 100
+      mirror:
+        host: podinfo.{{ .Namespace }}.svc.cluster.local
+        subset: canary
+      mirrorPercentage:
+        value: 100.0

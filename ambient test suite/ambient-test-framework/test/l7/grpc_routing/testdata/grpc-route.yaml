@@ -1,0 +1,25 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: podinfo-grpc-route
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  parentRefs:
+    - name: waypoint
+      kind: Gateway
+  rules:
+    - matches:
+        - method:
+            service: podinfo.v1.PodInfo
+            method: Get
+      backendRefs:
+        - name: podinfo-grpc
+          port: 9999
+          weight: 100
+    # Default: all other gRPC traffic
+    - backendRefs:
+        - name: podinfo-grpc
+          port: 9999
+          weight: 100

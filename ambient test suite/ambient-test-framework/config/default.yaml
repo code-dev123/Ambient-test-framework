@@ -1,0 +1,14 @@
+workloads:
+  podInfoImage: "ghcr.io/stefanprodan/podinfo:6.5.0"
+  podInfoImageV1: "ghcr.io/stefanprodan/podinfo:6.5.0"
+  podInfoImageV2: "ghcr.io/stefanprodan/podinfo:6.5.0"
+
+traffic:
+  defaultRequests: 200
+  defaultConcurrency: 10
+  tolerancePct: 15
+
+timeouts:
+  deploymentReadySec: 120
+  gatewayReadySec: 90
+  testOverallSec: 300

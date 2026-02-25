@@ -1,0 +1,22 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: podinfo-ew-canary
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  hosts:
+    - podinfo.{{ .Namespace }}.svc.cluster.local
+  gateways:
+    - mesh    # East-West only — internal mesh traffic
+  http:
+    - route:
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local
+            subset: stable
+          weight: {{ .StableWeight }}
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local
+            subset: canary
+          weight: {{ .CanaryWeight }}

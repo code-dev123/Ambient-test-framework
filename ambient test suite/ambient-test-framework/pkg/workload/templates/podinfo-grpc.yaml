@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo-grpc
+  namespace: {{ .Namespace }}
+  labels:
+    app: podinfo-grpc
+    test-id: {{ .TestID }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: podinfo-grpc
+  template:
+    metadata:
+      labels:
+        app: podinfo-grpc
+        test-id: {{ .TestID }}
+    spec:
+      containers:
+        - name: podinfo
+          image: {{ .PodInfoImageV1 }}
+          ports:
+            - containerPort: 9898
+              name: http
+            - containerPort: 9999
+              name: grpc
+          env:
+            - name: PODINFO_UI_MESSAGE
+              value: "podinfo-grpc"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podinfo-grpc
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  selector:
+    app: podinfo-grpc
+  ports:
+    - port: 9898
+      targetPort: 9898
+      name: http
+    - port: 9999
+      targetPort: 9999
+      name: grpc

@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: podinfo-fault-abort
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  hosts:
+    - podinfo.{{ .Namespace }}.svc.cluster.local
+  gateways:
+    - mesh
+  http:
+    - fault:
+        abort:
+          percentage:
+            value: 100.0
+          httpStatus: 503
+      route:
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local

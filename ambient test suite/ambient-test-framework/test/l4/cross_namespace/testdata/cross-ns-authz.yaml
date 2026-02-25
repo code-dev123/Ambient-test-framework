@@ -1,0 +1,16 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: cross-ns-allow
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            # Allow traffic from any namespace that is part of this test run
+            namespaces:
+              - "http-{{ .TestID }}"
+              - "grpc-{{ .TestID }}"

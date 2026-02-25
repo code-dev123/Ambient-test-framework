@@ -1,0 +1,24 @@
+# Alternative to HTTPRoute — use if Gateway API is not available
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: podinfo-canary-vs
+  namespace: {{ .Namespace }}
+  labels:
+    test-id: {{ .TestID }}
+spec:
+  hosts:
+    - podinfo.{{ .Namespace }}.svc.cluster.local
+  gateways:
+    - mesh
+    - podinfo-gateway
+  http:
+    - route:
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local
+            subset: stable
+          weight: {{ .StableWeight }}
+        - destination:
+            host: podinfo.{{ .Namespace }}.svc.cluster.local
+            subset: canary
+          weight: {{ .CanaryWeight }}
