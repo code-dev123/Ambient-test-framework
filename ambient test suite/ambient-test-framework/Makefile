@@ -31,7 +31,7 @@ clean: ## Remove build artifacts
 # Test targets
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Build base go test flags from make vars
+# Build base go test / ginkgo flags from make vars
 _TEST_FLAGS := -layer $(LAYER) -timeout $(TIMEOUT)
 ifneq ($(KUBECONFIG),)
   _TEST_FLAGS += -kubeconfig $(KUBECONFIG)
@@ -46,21 +46,15 @@ ifneq ($(RUN),)
   _TEST_FLAGS += -run $(RUN)
 endif
 
+# ── go test (standard runner, Ginkgo specs still run) ─────────────────────────
+
 .PHONY: test
-test: ## Run all tests (LAYER=all by default)
+test: ## Run all tests with go test (LAYER=all by default)
 	go test ./test/... -v $(_TEST_FLAGS)
 
 .PHONY: test-l4
 test-l4: ## Run only L4 tests
 	$(MAKE) test LAYER=l4
-
-.PHONY: test-l7
-test-l7: ## Run only L7 tests
-	$(MAKE) test LAYER=l7
-
-.PHONY: test-canary
-test-canary: ## Run only canary tests
-	go test ./test/l7/canary/... -v $(_TEST_FLAGS)
 
 .PHONY: test-baseline
 test-baseline: ## Run baseline (no-mesh) tests
@@ -69,6 +63,28 @@ test-baseline: ## Run baseline (no-mesh) tests
 .PHONY: test-unit
 test-unit: ## Run unit tests (pkg/ only — no cluster required)
 	go test ./pkg/... -v
+
+# ── ginkgo runner (coloured output, spec filtering, parallelism) ───────────────
+
+.PHONY: ginkgo-test
+ginkgo-test: ## Run all Ginkgo suites (requires: go install github.com/onsi/ginkgo/v2/ginkgo@latest)
+	ginkgo -v --timeout=$(TIMEOUT) ./test/... -- $(_TEST_FLAGS)
+
+.PHONY: ginkgo-l4
+ginkgo-l4: ## Run L4 Ginkgo suites
+	ginkgo -v --timeout=$(TIMEOUT) ./test/l4/... -- $(_TEST_FLAGS) -layer=l4
+
+.PHONY: ginkgo-baseline
+ginkgo-baseline: ## Run baseline (no-mesh) Ginkgo suite
+	ginkgo -v --timeout=$(TIMEOUT) ./test/baseline/... -- $(_TEST_FLAGS)
+
+.PHONY: ginkgo-parallel
+ginkgo-parallel: ## Run all suites in parallel (N processes)
+	ginkgo -v -p --timeout=$(TIMEOUT) ./test/... -- $(_TEST_FLAGS)
+
+.PHONY: install-ginkgo
+install-ginkgo: ## Install the Ginkgo CLI
+	go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Code quality

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/yourorg/ambient-test-framework/pkg/traffic"
 )
@@ -65,7 +67,7 @@ func MeasureTrafficSplit(ctx context.Context,
 		TotalRequests: total.Load(),
 		Hits:          make(map[string]int64),
 	}
-	hits.Range(func(k, v interface{}) bool {
+	hits.Range(func(k, v any) bool {
 		result.Hits[k.(string)] = v.(*atomic.Int64).Load()
 		return true
 	})
@@ -74,30 +76,22 @@ func MeasureTrafficSplit(ctx context.Context,
 
 // TrafficSplitWithinTolerance asserts that actual traffic percentages
 // are within tolerance of the expected weights.
-func TrafficSplitWithinTolerance(t *testing.T,
-	result *SplitResult,
+func TrafficSplitWithinTolerance(result *SplitResult,
 	expected map[string]float64,
 	tolerance float64) {
 
-	t.Helper()
-	if result.TotalRequests == 0 {
-		t.Fatal("no successful responses received — cannot measure traffic split")
-	}
+	Expect(result.TotalRequests).NotTo(BeZero(),
+		"no successful responses received — cannot measure traffic split")
+
 	for key, expectedPct := range expected {
 		actualPct := result.Percentage(key)
-		diff := expectedPct - actualPct
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff > tolerance {
-			t.Errorf("traffic split mismatch for %q: expected=%.1f%%, got=%.1f%% (diff=%.1f%%, tolerance=%.1f%%)",
-				key, expectedPct, actualPct, diff, tolerance)
-		} else {
-			t.Logf("traffic split OK for %q: expected=%.1f%%, got=%.1f%%",
-				key, expectedPct, actualPct)
-		}
+		Expect(actualPct).To(BeNumerically("~", expectedPct, tolerance),
+			"traffic split mismatch for %q: expected=%.1f%%, got=%.1f%%",
+			key, expectedPct, actualPct)
+		ginkgo.GinkgoWriter.Printf("traffic split OK for %q: expected=%.1f%%, got=%.1f%%\n",
+			key, expectedPct, actualPct)
 	}
-	t.Logf("total requests: %d, distribution: %s",
+	ginkgo.GinkgoWriter.Printf("total requests: %d, distribution: %s\n",
 		result.TotalRequests, formatHits(result))
 }
 

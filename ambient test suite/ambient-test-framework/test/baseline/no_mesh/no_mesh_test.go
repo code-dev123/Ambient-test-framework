@@ -4,9 +4,10 @@ package no_mesh
 import (
 	"context"
 	"net/http"
-	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/yourorg/ambient-test-framework/pkg/assert"
@@ -14,83 +15,92 @@ import (
 	"github.com/yourorg/ambient-test-framework/test"
 )
 
-// TestNoMeshBaselineHTTP establishes the baseline: HTTP traffic works
-// in the non-mesh namespace without any Istio policy applied.
-func TestNoMeshBaselineHTTP(t *testing.T) {
-	t.Parallel()
+var _ = Describe("No Mesh Baseline HTTP", func() {
+	var (
+		env      *test.Environment
+		ctx      context.Context
+		client   *http.Client
+		endpoint traffic.Endpoint
+	)
 
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Minute)
+		DeferCleanup(cancel)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+		client = &http.Client{Timeout: 5 * time.Second}
+		endpoint = traffic.Endpoint{
+			Host: "podinfo." + env.Namespaces.NonMesh + ".svc.cluster.local",
+			Port: 9898,
+			Path: "/healthz",
+		}
+	})
 
-	endpoint := traffic.Endpoint{
-		Host: "podinfo." + env.Namespaces.NonMesh + ".svc.cluster.local",
-		Port: 9898,
-		Path: "/healthz",
-	}
-
-	// ── TEST: Plain HTTP GET succeeds in non-mesh namespace ───
-	t.Run("plain_http_succeeds", func(t *testing.T) {
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+	It("plain HTTP GET succeeds in non-mesh namespace", func() {
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			2*time.Second, 30*time.Second)
 	})
 
-	// ── TEST: Multiple requests all succeed ───────────────────
-	t.Run("multiple_requests_succeed", func(t *testing.T) {
+	It("multiple requests all succeed", func() {
 		for i := 0; i < 10; i++ {
 			resp, err := traffic.HTTPGet(ctx, client, endpoint)
-			assert.NoError(t, err)
-			assert.StatusOK(t, resp)
+			assert.NoError(err)
+			assert.StatusOK(resp)
 		}
 	})
-}
+})
 
-// TestNoMeshBaselineTCP establishes the baseline: TCP connectivity works
-// in the non-mesh namespace.
-func TestNoMeshBaselineTCP(t *testing.T) {
-	t.Parallel()
+var _ = Describe("No Mesh Baseline TCP", func() {
+	var (
+		env      *test.Environment
+		ctx      context.Context
+		endpoint traffic.TCPEndpoint
+	)
 
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Minute)
+		DeferCleanup(cancel)
 
-	endpoint := traffic.TCPEndpoint{
-		Host: "podinfo." + env.Namespaces.NonMesh + ".svc.cluster.local",
-		Port: 9898,
-	}
+		endpoint = traffic.TCPEndpoint{
+			Host: "podinfo." + env.Namespaces.NonMesh + ".svc.cluster.local",
+			Port: 9898,
+		}
+	})
 
-	// ── TEST: TCP connection succeeds ────────────────────────
-	t.Run("tcp_connect_succeeds", func(t *testing.T) {
+	It("TCP connection succeeds", func() {
 		err := traffic.TCPConnectWithRetry(ctx, endpoint,
 			2*time.Second, 30*time.Second)
-		assert.NoError(t, err)
+		assert.NoError(err)
 	})
-}
+})
 
-// TestNoMeshIsolation verifies that the non-mesh namespace does NOT
-// have the ambient mode label — this is the control group.
-func TestNoMeshIsolation(t *testing.T) {
-	t.Parallel()
+var _ = Describe("No Mesh Isolation", func() {
+	var (
+		env *test.Environment
+		ctx context.Context
+	)
 
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+		DeferCleanup(cancel)
+	})
 
-	t.Run("non_mesh_namespace_not_ambient", func(t *testing.T) {
+	It("non-mesh namespace does not have the ambient label", func() {
 		ns, err := env.Clientset.CoreV1().Namespaces().Get(ctx,
 			env.Namespaces.NonMesh, metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("get namespace %s: %v", env.Namespaces.NonMesh, err)
-		}
+		Expect(err).NotTo(HaveOccurred(), "get namespace %s", env.Namespaces.NonMesh)
 		if v, ok := ns.Labels["istio.io/dataplane-mode"]; ok && v == "ambient" {
-			t.Errorf("non-mesh namespace %s should NOT have ambient label, but does",
-				env.Namespaces.NonMesh)
+			Fail("non-mesh namespace " + env.Namespaces.NonMesh +
+				" should NOT have ambient label, but does")
 		}
 	})
 
-	t.Run("ztunnel_running", func(t *testing.T) {
-		assert.ZTunnelRunning(ctx, t, env.Clientset)
+	It("ztunnel DaemonSet is running", func() {
+		assert.ZTunnelRunning(ctx, env.Clientset)
 	})
-}
+})

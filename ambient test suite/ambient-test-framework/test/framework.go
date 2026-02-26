@@ -3,10 +3,11 @@ package test
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"sync"
-	"testing"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -20,18 +21,16 @@ import (
 
 // LayerFlag is the -layer flag value, registered here so sub-packages
 // can call SkipUnlessLayer without importing a test-only file.
-var LayerFlag = flag.String("layer", "all", "l4, l7, all")
+var LayerFlag = flag.String("layer", "all", "l4, all")
 
-// SkipUnlessLayer skips the test if -layer does not match the given layer.
-// Sub-test packages import this from the test package (framework.go, not a _test.go).
-func SkipUnlessLayer(t *testing.T, layer string) {
-	t.Helper()
+// SkipUnlessLayer skips the current Ginkgo spec if -layer does not match.
+func SkipUnlessLayer(layer string) {
 	if *LayerFlag != "all" && *LayerFlag != layer {
-		t.Skipf("skipping: -layer=%s (this test is layer=%s)", *LayerFlag, layer)
+		ginkgo.Skip(fmt.Sprintf("skipping: -layer=%s (this test is layer=%s)", *LayerFlag, layer))
 	}
 }
 
-// Environment is the shared state created once in TestMain.
+// Environment is the shared state created once in BeforeSuite.
 type Environment struct {
 	Clientset       kubernetes.Interface
 	DynClient       dynamic.Interface
@@ -45,20 +44,23 @@ type Environment struct {
 
 var (
 	globalEnv *Environment
-	envOnce   sync.Once
+	envMu     sync.Mutex
 )
 
-// SetEnvironment is called by TestMain after setup.
+// SetEnvironment is called by BeforeSuite after setup.
 func SetEnvironment(env *Environment) {
+	envMu.Lock()
+	defer envMu.Unlock()
 	globalEnv = env
 }
 
 // GetEnvironment retrieves the shared environment.
-// Fails the test if TestMain hasn't set it up.
-func GetEnvironment(t *testing.T) *Environment {
-	t.Helper()
+// Fails the current Ginkgo spec if BeforeSuite hasn't set it up.
+func GetEnvironment() *Environment {
+	envMu.Lock()
+	defer envMu.Unlock()
 	if globalEnv == nil {
-		t.Fatal("test environment not initialized — is TestMain running?")
+		ginkgo.Fail("test environment not initialized — is BeforeSuite running?")
 	}
 	return globalEnv
 }

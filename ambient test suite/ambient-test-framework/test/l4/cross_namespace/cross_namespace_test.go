@@ -5,8 +5,10 @@ import (
 	"context"
 	"embed"
 	"net/http"
-	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/yourorg/ambient-test-framework/pkg/assert"
 	"github.com/yourorg/ambient-test-framework/pkg/manifest"
@@ -17,89 +19,95 @@ import (
 //go:embed testdata/*
 var testdataFS embed.FS
 
-// TestCrossNamespaceAllowed verifies that an AuthorizationPolicy explicitly
-// allowing cross-namespace traffic works correctly in ambient mode.
-func TestCrossNamespaceAllowed(t *testing.T) {
-	test.SkipUnlessLayer(t, "l4")
-	t.Parallel()
-
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	applier := env.NewApplier()
-	values := manifest.TemplateValues{
-		Namespace: env.Namespaces.HTTP,
-		TestID:    env.RunID,
-	}
-
-	// ── SETUP ────────────────────────────────────────────────
-	result, err := applier.ApplyFolder(ctx, testdataFS, "testdata", values)
-	if err != nil {
-		t.Fatalf("apply cross-ns manifests: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, c := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer c()
-		applier.DeleteResult(cleanupCtx, result)
+var _ = Describe("Cross-Namespace Allowed", func() {
+	BeforeEach(func() {
+		test.SkipUnlessLayer("l4")
 	})
 
-	time.Sleep(5 * time.Second)
+	var (
+		env    *test.Environment
+		ctx    context.Context
+		client *http.Client
+	)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+		DeferCleanup(cancel)
 
-	// ── TEST: HTTP client (http namespace) can reach HTTP service ───
-	t.Run("http_ns_to_http_ns", func(t *testing.T) {
+		applier := env.NewApplier()
+		values := manifest.TemplateValues{
+			Namespace: env.Namespaces.HTTP,
+			TestID:    env.RunID,
+		}
+
+		result, err := applier.ApplyFolder(ctx, testdataFS, "testdata", values)
+		Expect(err).NotTo(HaveOccurred(), "apply cross-ns manifests")
+		DeferCleanup(func() {
+			cleanupCtx, c := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer c()
+			applier.DeleteResult(cleanupCtx, result)
+		})
+
+		time.Sleep(5 * time.Second)
+		client = &http.Client{Timeout: 5 * time.Second}
+	})
+
+	It("HTTP client (http namespace) can reach HTTP service", func() {
 		endpoint := traffic.Endpoint{
 			Host: "podinfo." + env.Namespaces.HTTP + ".svc.cluster.local",
 			Port: 9898,
 			Path: "/healthz",
 		}
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			2*time.Second, 30*time.Second)
 	})
 
-	// ── TEST: GRPC client can reach HTTP service ─────────────
-	t.Run("grpc_ns_to_http_ns", func(t *testing.T) {
+	It("GRPC client can reach HTTP service", func() {
 		endpoint := traffic.Endpoint{
 			Host: "podinfo." + env.Namespaces.HTTP + ".svc.cluster.local",
 			Port: 9898,
 			Path: "/healthz",
 		}
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			2*time.Second, 30*time.Second)
 	})
 
-	// ── TEST: Non-mesh client is denied ─────────────────────
-	t.Run("non_mesh_denied", func(t *testing.T) {
+	It("non-mesh client is denied (ztunnel enforces policy)", func() {
 		// The policy only allows http-* and grpc-* namespaces.
-		// Traffic from non-mesh-* should be denied.
-		assert.ZTunnelRunning(ctx, t, env.Clientset)
+		// Verify ztunnel is running and enforcing the policy.
+		assert.ZTunnelRunning(ctx, env.Clientset)
 	})
-}
+})
 
-// TestCrossNamespaceDefaultDeny verifies that without explicit ALLOW policies,
-// cross-namespace traffic from a different principal is denied when DENY ALL
-// is in effect.
-func TestCrossNamespaceDefaultDeny(t *testing.T) {
-	test.SkipUnlessLayer(t, "l4")
-	t.Parallel()
+var _ = Describe("Cross-Namespace Default Deny", func() {
+	BeforeEach(func() {
+		test.SkipUnlessLayer("l4")
+	})
 
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	var (
+		env *test.Environment
+		ctx context.Context
+	)
 
-	// Without any AuthorizationPolicy, ambient defaults to ALLOW
-	// (unless a DENY policy is present). This test documents that baseline.
-	endpoint := traffic.Endpoint{
-		Host: "podinfo." + env.Namespaces.GRPC + ".svc.cluster.local",
-		Port: 9898,
-		Path: "/healthz",
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Minute)
+		DeferCleanup(cancel)
+	})
 
-	t.Run("no_policy_allows_all", func(t *testing.T) {
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+	It("no policy allows all traffic by default", func() {
+		// Without any AuthorizationPolicy, ambient defaults to ALLOW
+		// (unless a DENY policy is present). This test documents that baseline.
+		endpoint := traffic.Endpoint{
+			Host: "podinfo." + env.Namespaces.GRPC + ".svc.cluster.local",
+			Port: 9898,
+			Path: "/healthz",
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			2*time.Second, 30*time.Second)
 	})
-}
+})

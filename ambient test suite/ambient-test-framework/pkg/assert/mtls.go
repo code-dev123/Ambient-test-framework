@@ -3,71 +3,46 @@ package assert
 
 import (
 	"context"
-	"testing"
 
+	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-// MTLSEnforced asserts that mTLS is enforced between two pods by checking
-// that a plaintext connection fails. In ambient mode, ztunnel enforces
-// mTLS transparently; this helper verifies via Istio telemetry or proxy logs.
-func MTLSEnforced(ctx context.Context, t *testing.T,
-	clientset kubernetes.Interface,
+// MTLSEnforced asserts that the given namespace is enrolled in ambient mesh,
+// which means ztunnel is enforcing mTLS transparently for the named workload.
+func MTLSEnforced(ctx context.Context, clientset kubernetes.Interface,
 	namespace, podName string) {
 
-	t.Helper()
-	// Check that the pod has the ambient mesh label via namespace
-	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace,
-		metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get namespace %s: %v", namespace, err)
-	}
-	mode, ok := ns.Labels["istio.io/dataplane-mode"]
-	if !ok || mode != "ambient" {
-		t.Errorf("namespace %s is not enrolled in ambient mesh "+
-			"(label istio.io/dataplane-mode=%q)",
-			namespace, mode)
-	}
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "get namespace %s", namespace)
+	mode := ns.Labels["istio.io/dataplane-mode"]
+	Expect(mode).To(Equal("ambient"),
+		"namespace %s is not enrolled in ambient mesh (label istio.io/dataplane-mode=%q)",
+		namespace, mode)
 }
 
-// ZTunnelRunning asserts that the ztunnel DaemonSet is running.
-func ZTunnelRunning(ctx context.Context, t *testing.T,
-	clientset kubernetes.Interface) {
-
-	t.Helper()
+// ZTunnelRunning asserts that the ztunnel DaemonSet is running with ready pods.
+func ZTunnelRunning(ctx context.Context, clientset kubernetes.Interface) {
 	ds, err := clientset.AppsV1().DaemonSets("istio-system").
 		Get(ctx, "ztunnel", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get ztunnel daemonset: %v", err)
-	}
-	if ds.Status.NumberReady == 0 {
-		t.Error("ztunnel DaemonSet has 0 ready pods")
-	}
+	Expect(err).NotTo(HaveOccurred(), "get ztunnel daemonset")
+	Expect(ds.Status.NumberReady).To(BeNumerically(">", 0),
+		"ztunnel DaemonSet has 0 ready pods")
 }
 
 // WaypointRunning asserts that a waypoint proxy deployment is running
 // in the given namespace.
-func WaypointRunning(ctx context.Context, t *testing.T,
-	clientset kubernetes.Interface, namespace string) {
-
-	t.Helper()
-	// Waypoint deployments are labeled with gateway.istio.io/managed
+func WaypointRunning(ctx context.Context, clientset kubernetes.Interface, namespace string) {
 	deps, err := clientset.AppsV1().Deployments(namespace).List(ctx,
 		metav1.ListOptions{
 			LabelSelector: "gateway.istio.io/managed=istio.io-mesh-controller",
 		})
-	if err != nil {
-		t.Fatalf("list waypoint deployments in %s: %v", namespace, err)
-	}
-	if len(deps.Items) == 0 {
-		t.Errorf("no waypoint deployment found in namespace %s", namespace)
-		return
-	}
+	Expect(err).NotTo(HaveOccurred(), "list waypoint deployments in %s", namespace)
+	Expect(deps.Items).NotTo(BeEmpty(),
+		"no waypoint deployment found in namespace %s", namespace)
 	for _, dep := range deps.Items {
-		if dep.Status.AvailableReplicas == 0 {
-			t.Errorf("waypoint %s/%s has 0 available replicas",
-				namespace, dep.Name)
-		}
+		Expect(dep.Status.AvailableReplicas).To(BeNumerically(">", 0),
+			"waypoint %s/%s has 0 available replicas", namespace, dep.Name)
 	}
 }

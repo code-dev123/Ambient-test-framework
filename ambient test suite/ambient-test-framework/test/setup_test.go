@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"testing"
 	"time"
 
+	. "github.com/onsi/gomega"
+
 	"github.com/yourorg/ambient-test-framework/pkg/traffic"
-	pkgwait "github.com/yourorg/ambient-test-framework/pkg/wait"
 )
 
 // HTTPEndpointInNamespace returns a traffic.Endpoint for a named service
@@ -38,28 +38,22 @@ func GRPCEndpointInNamespace(env *Environment,
 }
 
 // WaitForHTTPService polls until the named service returns HTTP 200.
-func WaitForHTTPService(ctx context.Context, t *testing.T,
+func WaitForHTTPService(ctx context.Context,
 	env *Environment, serviceName, path string, port int,
 	timeout time.Duration) {
 
-	t.Helper()
 	endpoint := HTTPEndpointInNamespace(env, serviceName, path, port)
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	err := pkgwait.UntilNoError(ctx,
-		func(ctx context.Context) error {
-			resp, err := traffic.HTTPGet(ctx, client, endpoint)
-			if err != nil {
-				return err
-			}
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("status %d", resp.StatusCode)
-			}
-			return nil
-		},
-		3*time.Second, timeout)
-
-	if err != nil {
-		t.Fatalf("service %s never became ready: %v", serviceName, err)
-	}
+	Eventually(func(ctx context.Context) error {
+		resp, err := traffic.HTTPGet(ctx, client, endpoint)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("status %d", resp.StatusCode)
+		}
+		return nil
+	}).WithContext(ctx).WithTimeout(timeout).WithPolling(3 * time.Second).
+		Should(Succeed(), "service %s never became ready", serviceName)
 }

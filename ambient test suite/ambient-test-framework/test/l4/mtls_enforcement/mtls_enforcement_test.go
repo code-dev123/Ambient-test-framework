@@ -5,106 +5,108 @@ import (
 	"context"
 	"embed"
 	"net/http"
-	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/yourorg/ambient-test-framework/pkg/assert"
 	"github.com/yourorg/ambient-test-framework/pkg/manifest"
 	"github.com/yourorg/ambient-test-framework/pkg/traffic"
-	pkgwait "github.com/yourorg/ambient-test-framework/pkg/wait"
 	"github.com/yourorg/ambient-test-framework/test"
 )
 
 //go:embed testdata/*
 var testdataFS embed.FS
 
-// TestMTLSEnforcementStrict verifies that STRICT mTLS mode is enforced in
-// an ambient-enrolled namespace: mesh-enrolled clients succeed, non-mesh
-// plaintext traffic is rejected.
-func TestMTLSEnforcementStrict(t *testing.T) {
-	test.SkipUnlessLayer(t, "l4")
-	t.Parallel()
-
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	applier := env.NewApplier()
-	values := manifest.TemplateValues{
-		Namespace: env.Namespaces.HTTP,
-		TestID:    env.RunID,
-	}
-
-	// ── SETUP: Apply PeerAuthentication STRICT ────────────────
-	result, err := applier.ApplyFolder(ctx, testdataFS, "testdata", values)
-	if err != nil {
-		t.Fatalf("apply peer-auth manifests: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, c := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer c()
-		applier.DeleteResult(cleanupCtx, result)
+var _ = Describe("mTLS Enforcement: STRICT mode", func() {
+	BeforeEach(func() {
+		test.SkipUnlessLayer("l4")
 	})
 
-	// Wait briefly for the policy to propagate
-	time.Sleep(5 * time.Second)
+	var (
+		env *test.Environment
+		ctx context.Context
+	)
 
-	// ── TEST: Mesh client can reach service ───────────────────
-	t.Run("mesh_client_allowed", func(t *testing.T) {
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+		DeferCleanup(cancel)
+
+		applier := env.NewApplier()
+		values := manifest.TemplateValues{
+			Namespace: env.Namespaces.HTTP,
+			TestID:    env.RunID,
+		}
+
+		result, err := applier.ApplyFolder(ctx, testdataFS, "testdata", values)
+		Expect(err).NotTo(HaveOccurred(), "apply peer-auth manifests")
+		DeferCleanup(func() {
+			cleanupCtx, c := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer c()
+			applier.DeleteResult(cleanupCtx, result)
+		})
+
+		time.Sleep(5 * time.Second)
+	})
+
+	It("mesh client can reach service through ztunnel mTLS", func() {
 		endpoint := traffic.Endpoint{
 			Host: "podinfo." + env.Namespaces.HTTP + ".svc.cluster.local",
 			Port: 9898,
 			Path: "/healthz",
 		}
 		client := &http.Client{Timeout: 5 * time.Second}
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			3*time.Second, 30*time.Second)
 	})
 
-	// ── TEST: ztunnel is running and enforcing mTLS ───────────
-	t.Run("ztunnel_running", func(t *testing.T) {
-		assert.ZTunnelRunning(ctx, t, env.Clientset)
+	It("ztunnel DaemonSet is running and enforcing mTLS", func() {
+		assert.ZTunnelRunning(ctx, env.Clientset)
 	})
 
-	// ── TEST: Namespace is enrolled in ambient mesh ───────────
-	t.Run("namespace_ambient_enrolled", func(t *testing.T) {
-		assert.MTLSEnforced(ctx, t, env.Clientset,
-			env.Namespaces.HTTP, "podinfo")
+	It("namespace is enrolled in ambient mesh", func() {
+		assert.MTLSEnforced(ctx, env.Clientset, env.Namespaces.HTTP, "podinfo")
 	})
 
-	// ── TEST: mTLS mode label is present ─────────────────────
-	t.Run("ambient_label_verified", func(t *testing.T) {
-		err := pkgwait.UntilNoError(ctx, func(ctx context.Context) error {
-			assert.MTLSEnforced(ctx, t, env.Clientset,
-				env.Namespaces.HTTP, "podinfo")
+	It("ambient label is present and stable (retried with Gomega Eventually)", func() {
+		// Use Gomega Eventually instead of the custom pkgwait helper.
+		Eventually(func(ctx context.Context) error {
+			assert.MTLSEnforced(ctx, env.Clientset, env.Namespaces.HTTP, "podinfo")
 			return nil
-		}, 2*time.Second, 20*time.Second)
-		if err != nil {
-			t.Fatalf("ambient label check failed: %v", err)
-		}
+		}).WithContext(ctx).WithTimeout(20 * time.Second).WithPolling(2 * time.Second).
+			Should(Succeed(), "ambient label check failed")
 	})
-}
+})
 
-// TestMTLSPeerAuthPermissive verifies that in PERMISSIVE mode both
-// mTLS and plaintext connections succeed.
-func TestMTLSPeerAuthPermissive(t *testing.T) {
-	test.SkipUnlessLayer(t, "l4")
-	t.Parallel()
+var _ = Describe("mTLS Enforcement: PERMISSIVE mode", func() {
+	BeforeEach(func() {
+		test.SkipUnlessLayer("l4")
+	})
 
-	env := test.GetEnvironment(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	var (
+		env *test.Environment
+		ctx context.Context
+	)
 
-	// No PeerAuthentication applied → default is PERMISSIVE in ambient
-	endpoint := traffic.Endpoint{
-		Host: "podinfo." + env.Namespaces.HTTP + ".svc.cluster.local",
-		Port: 9898,
-		Path: "/healthz",
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	BeforeEach(func() {
+		env = test.GetEnvironment()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Minute)
+		DeferCleanup(cancel)
+	})
 
-	t.Run("permissive_allows_plaintext", func(t *testing.T) {
-		assert.EventuallyHTTPOK(ctx, t, client, endpoint,
+	It("PERMISSIVE mode allows plaintext connections", func() {
+		// No PeerAuthentication applied → default is PERMISSIVE in ambient.
+		endpoint := traffic.Endpoint{
+			Host: "podinfo." + env.Namespaces.HTTP + ".svc.cluster.local",
+			Port: 9898,
+			Path: "/healthz",
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		assert.EventuallyHTTPOK(ctx, client, endpoint,
 			3*time.Second, 30*time.Second)
 	})
-}
+})
